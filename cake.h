@@ -1,10 +1,17 @@
 #pragma once
 
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vadefs.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include "Windows.h"
+#include "shellapi.h"
+#else
+
+#endif
 
 extern void configure_build();
 
@@ -24,6 +31,8 @@ typedef struct
     ck_stage stage;
     char* name;
 } ck_stage_name_pair;
+
+// ===================================== INTERNAL =====================================
 
 typedef struct
 {
@@ -84,6 +93,7 @@ void _internal_ck_execute_stage(ck_stage* stage)
     stage->work();
 }
 
+
 int main(int argc, char** argv)
 {
     configure_build();
@@ -107,6 +117,103 @@ int main(int argc, char** argv)
         _internal_ck_execute_stage(&_internal_ck_state.stageNamePair[_internal_ck_state.pairCount-1].stage);
     }
 
+    return 0;
+}
+
+// ===================================== INTERNAL =====================================
+
+BOOL ck_mkdir(char* path)
+{
+#ifdef _WIN32
+    return CreateDirectory(path, 0);
+#else
+
+#endif
+}
+
+BOOL ck_rmdir(char* path)
+{
+#ifdef _WIN32
+    int pathLength = strlen(path);
+    char* doubleNullPath = malloc(pathLength + 2);
+    strncpy_s(doubleNullPath, pathLength + 1, path, pathLength + 1);
+    doubleNullPath[pathLength] = '\0';
+    doubleNullPath[pathLength + 1] = '\0';
+
+    SHFILEOPSTRUCTA fileOp = 
+    {
+        .wFunc = FO_DELETE,
+        .pFrom = doubleNullPath,
+        .fFlags = FOF_NO_UI | FOF_NOCONFIRMATION,
+    };
+
+    return !SHFileOperationA(&fileOp);
+#else
+#endif
+}
+
+BOOL ck_rmfile(char* path)
+{
+#ifdef _WIN32
+    return DeleteFile(path);
+#else
+#endif
+}
+
+void* ck_create_file(char* path)
+{
+#ifdef _WIN32
+    HANDLE file = CreateFile
+    (
+        path,
+        GENERIC_WRITE,
+        0,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return 0;
+    }
+    
+    return file;
+#else
+#endif
+}
+
+BOOL ck_write_file(void* handle, char* data, unsigned long dataSize)
+{
+#ifdef _WIN32
+    DWORD dataWritten = 0;
+    BOOL result = WriteFile(handle, data, dataSize, &dataWritten, NULL);
+
+    if (result && dataSize == dataWritten)
+    {
+        return 1;
+    }
 
     return 0;
+#else
+#endif
+}
+
+BOOL ck_append_file(void* handle, char* data, unsigned long dataSize)
+{
+#ifdef _WIN32
+    SetFilePointer(handle, 0, NULL, FILE_END);
+
+    DWORD dataWritten = 0;
+    BOOL result = WriteFile(handle, data, dataSize, &dataWritten, NULL);
+
+    if (result && dataSize == dataWritten)
+    {
+        return 1;
+    }
+
+    return 0;
+#else
+#endif
 }
