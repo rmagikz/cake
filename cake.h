@@ -46,6 +46,7 @@ typedef struct
 {
     char** lines;
     int count;
+    int isValid;
 } ck_shell_output;
 
 typedef struct
@@ -140,10 +141,10 @@ int main(int argc, char** argv)
     return 0;
 }
 
-#define CHUNK_SIZE 4096
 void _internal_ck_shell_output(ck_shell_output* output, ck_handle handle)
 {
-    output->lines = malloc(sizeof(char*) * 10);
+    int capacity = 10;
+    output->lines = malloc(sizeof(char*) * capacity);
     output->count = 0;
 
     DWORD chunkSize = 4096;
@@ -173,19 +174,31 @@ void _internal_ck_shell_output(ck_shell_output* output, ck_handle handle)
                 memcpy(output->lines[output->count], readBuffer + lastLine, i - lastLine + 1);
                 output->lines[output->count][i - lastLine - carriageReturnPadding] = '\0';
                 output->count++;
+
+                if (output->count >= capacity)
+                {
+                    capacity *= 2;
+                    output->lines = realloc(output->lines, sizeof(char*) * capacity);
+                }
+
                 lastLine = i + 1;
             }
         }
     }
+
+    output->isValid = 1;
 }
 
-#define ck_shell(command, ...) _internal_ck_shell(0, command, __VA_ARGS__, 0)
-#define ck_shell_out(std_out, command, ...) _internal_ck_shell(std_out, command, __VA_ARGS__, 0)
-void _internal_ck_shell(ck_shell_output* std_out, char* command, ...)
+#define ck_shell(command, ...) _internal_ck_shell(command, __VA_ARGS__, 0)
+ck_shell_output _internal_ck_shell(char* command, ...)
 {
 #ifdef WIN32
-    char commandBuffer[1024];
+    ck_shell_output result =
+    {
+        .isValid = 0
+    };
 
+    char commandBuffer[1024];
     va_list args;
     va_start(args, command);
     vsnprintf(commandBuffer, sizeof(commandBuffer), command, args);
@@ -201,18 +214,18 @@ void _internal_ck_shell(ck_shell_output* std_out, char* command, ...)
         .lpSecurityDescriptor = NULL,
     };
 
-    if (std_out != 0 && !CreatePipe(&std_out_read, &std_out_write, &saAttr, 0))
+    if (!CreatePipe(&std_out_read, &std_out_write, &saAttr, 0))
     {
         // handle errors.
-        return;
+        return result;
     }
 
     STARTUPINFO si =
     {
         .cb = sizeof(STARTUPINFO),
         .dwFlags = STARTF_USESTDHANDLES,
-        .hStdOutput = std_out == 0 ? GetStdHandle(STD_OUTPUT_HANDLE) : std_out_write,
-        .hStdError = std_out == 0 ? GetStdHandle(STD_ERROR_HANDLE) : std_out_write,
+        .hStdOutput = std_out_write,
+        .hStdError = std_out_write,
         .hStdInput = GetStdHandle(STD_INPUT_HANDLE),
     };
 
@@ -233,20 +246,21 @@ void _internal_ck_shell(ck_shell_output* std_out, char* command, ...)
     ))
     {
         // handle errors.
-        return;
+        return result;
     }
 
     WaitForSingleObject(pi.hProcess, INFINITE);
 
-    if (std_out != 0)
-    {
-        CloseHandle(std_out_write);
-        _internal_ck_shell_output(std_out, std_out_read);
-        CloseHandle(std_out_read);
-    }
+    CloseHandle(std_out_write);
+
+    _internal_ck_shell_output(&result, std_out_read);
+
+    CloseHandle(std_out_read);
 
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+
+    return result;
 #else
 #endif
 }
