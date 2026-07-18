@@ -176,7 +176,7 @@ void _internal_ck_execute_stage(ck_stage* stage, int indentLevel)
 
 int main(int argc, char** argv)
 {
-    CK_INTERNAL("---------- Starting Cake ----------\n");
+    CK_INTERNAL("---------- Starting Cake ----------");
 
     configure_build();
 
@@ -198,6 +198,8 @@ int main(int argc, char** argv)
     {
         _internal_ck_execute_stage(&_internal_ck_state.stages[_internal_ck_state.stageCount - 1], 0);
     }
+
+    CK_INTERNAL("------------ Finished -------------\n");
 
     return 0;
 }
@@ -343,3 +345,29 @@ void ck_shell_free_output(ck_shell_output* output)
 }
 
 // ===================================== SHELL API =====================================
+
+#define ck_make_path(format, ...) _internal_ck_make_path(format, ##__VA_ARGS__)
+char* _internal_ck_make_path(char* format, ...)
+{
+#ifdef WIN32
+    char pathBuffer[32000] = "";
+    
+    va_list args;
+    va_start(args, format);
+    vsnprintf(pathBuffer, sizeof(pathBuffer), format, args);
+    va_end(args);
+
+    int pathLength = strlen(pathBuffer);
+    for (int i = 0; i < pathLength; ++i)
+    {
+        if (pathBuffer[i] == '/') { pathBuffer[i] = '\\'; }
+    }
+
+    char* path = malloc(pathLength + 1);
+    memcpy(path, pathBuffer, pathLength);
+    path[pathLength] = '\0';
+
+    return path;
+#else
+#endif
+}
