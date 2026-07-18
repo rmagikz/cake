@@ -24,16 +24,11 @@ typedef void* ck_handle;
 
 typedef struct ck_stage
 {
+    char* name;
     stage_work work;
     ck_stage_handle* dependencies;
     int depCount;
 } ck_stage;
-
-typedef struct
-{
-    ck_stage stage;
-    char* name;
-} ck_stage_name_pair;
 
 typedef struct
 {
@@ -56,13 +51,77 @@ typedef struct
     ck_shell_output std_err;
 } ck_shell_info;
 
+typedef enum
+{
+    CK_LOG_LEVEL_INTERNAL,
+    CK_LOG_LEVEL_FATAL,
+    CK_LOG_LEVEL_ERROR,
+    CK_LOG_LEVEL_WARNING,
+    CK_LOG_LEVEL_INFO,
+    CK_LOG_LEVEL_DEBUG,
+    CK_LOG_LEVEL_TRACE,
+} ck_log_level;
+
 typedef struct
 {
-    ck_stage_name_pair* stageNamePair;
-    int pairCount;
+    ck_stage* stages;
+    int stageCount;
+    ck_log_level logLevel;
 } ck_state;
 
-static ck_state _internal_ck_state = {};
+static ck_state _internal_ck_state =
+{
+    .logLevel = CK_LOG_LEVEL_INFO
+};
+
+// ==================================== LOG API ========================================
+
+static const char* level_strings[] = {"[CAKE]", "[FATAL]", "[ERROR]", "[WARNING]", "[INFO]", "[DEBUG]", "[TRACE]" };
+static const char* level_color[] = {"\033[0m", "\033[1;97m\033[101m", "\033[1;31m", "\033[1;33m", "\033[0;97m", "\033[0;92m", "\033[0;34m"};
+static const char* color_reset = "\033[0m";
+
+#define CK_FATAL(format, ...) ck_log(CK_LOG_LEVEL_FATAL, format, ##__VA_ARGS__)
+
+#define CK_ERROR(format, ...) ck_log(CK_LOG_LEVEL_ERROR, format, ##__VA_ARGS__)
+
+#define CK_WARN(format, ...) ck_log(CK_LOG_LEVEL_WARNING, format, ##__VA_ARGS__)
+
+#define CK_INFO(format, ...) ck_log(CK_LOG_LEVEL_INFO, format, ##__VA_ARGS__)
+
+#define CK_DEBUG(format, ...) ck_log(CK_LOG_LEVEL_DEBUG, format, ##__VA_ARGS__)
+
+#define CK_TRACE(format, ...) ck_log(CK_LOG_LEVEL_TRACE, format, ##__VA_ARGS__)
+
+#define CK_INTERNAL(format, ...) ck_log(CK_LOG_LEVEL_INTERNAL, format, ##__VA_ARGS__)
+
+void ck_log(ck_log_level level, char* format, ...)
+{
+    if (level > _internal_ck_state.logLevel) { return; }
+
+    va_list ptr;
+
+    char out_message[32000] = "";
+
+    va_start(ptr, format);
+    vsnprintf(out_message, 32000, format, ptr);
+    va_end(ptr);
+
+    char formatted_message[32000] = "";
+    sprintf(formatted_message, "%s%s %s%s\n", level_color[level], level_strings[level], out_message, color_reset);
+    printf("%s", formatted_message);
+}
+
+void ck_set_log_level(ck_log_level level)
+{
+    if (level == 0)
+    {
+        CK_FATAL("Setting Cake log level to 0 is not permitted.");
+        return;
+    }
+    _internal_ck_state.logLevel = level;
+}
+
+// ==================================== LOG API ========================================
 
 #define ck_make_stage(name, work, ...) _internal_ck_make_stage(name, work, __VA_ARGS__, 0)
 ck_stage_handle _internal_ck_make_stage(char* stage_name, stage_work work, ...)
@@ -78,68 +137,72 @@ ck_stage_handle _internal_ck_make_stage(char* stage_name, stage_work work, ...)
     va_end(args);
 
     ck_state* state = &_internal_ck_state;
-    state->pairCount++;
-    state->stageNamePair = realloc(state->stageNamePair, sizeof(ck_stage_name_pair) * state->pairCount);
+    state->stageCount++;
+    state->stages = realloc(state->stages, sizeof(ck_stage) * state->stageCount);
 
-    ck_stage_name_pair* pair = &state->stageNamePair[state->pairCount - 1];
-    pair->stage.work = work;
-    pair->stage.depCount = argCount;
-    if (argCount > 0) { pair->stage.dependencies = malloc(sizeof(ck_stage_handle) * argCount); }
+    ck_stage* stage = &state->stages[state->stageCount - 1];
+    stage->work = work;
+    stage->depCount = argCount;
+    if (argCount > 0) { stage->dependencies = malloc(sizeof(ck_stage_handle) * argCount); }
 
     int nameLength = strlen(stage_name);
-    pair->name = malloc((nameLength + 1) * sizeof(char));
-    strncpy_s(pair->name, nameLength + 1, stage_name, nameLength + 1);
+    stage->name = malloc((nameLength + 1) * sizeof(char));
+    strncpy_s(stage->name, nameLength + 1, stage_name, nameLength + 1);
 
     va_start(args, work);
     for (int i = 0; i < argCount; ++i)
     {
         const ck_stage_handle depHandle = va_arg(args, const ck_stage_handle);
-        pair->stage.dependencies[i] = depHandle;
+        stage->dependencies[i] = depHandle;
     }
     va_end(args);
 
-    return state->pairCount;
-
+    return state->stageCount;
 }
 
-void _internal_ck_execute_stage(ck_stage* stage)
+void _internal_ck_execute_stage(ck_stage* stage, int indentLevel)
 {
     ck_state* state = &_internal_ck_state;
 
     for (int i = 0; i < stage->depCount; ++i)
     {
-        ck_stage* dependencyStage = &state->stageNamePair[stage->dependencies[i] - 1].stage;
-        _internal_ck_execute_stage(dependencyStage);
+        ck_stage* dependencyStage = &state->stages[stage->dependencies[i] - 1];
+        _internal_ck_execute_stage(dependencyStage, indentLevel + 1);
     }
 
+    CK_INTERNAL("Executing Stage: %s", stage->name);
     stage->work();
 }
 
 int main(int argc, char** argv)
 {
+    CK_INTERNAL("---------- Starting Cake ----------\n");
+
     configure_build();
 
     ck_state* state = &_internal_ck_state;
 
     if (argc > 1)
     {
-        for (int i = 0; i < state->pairCount; ++i)
+        for (int i = 0; i < state->stageCount; ++i)
         {
-            ck_stage_name_pair pair = state->stageNamePair[i];
-            if (strcmp(argv[1], pair.name) == 0)
+            ck_stage stage = state->stages[i];
+            if (strcmp(argv[1], stage.name) == 0)
             {
-                _internal_ck_execute_stage(&pair.stage);
+                _internal_ck_execute_stage(&stage, 0);
                 break;
             }
         }
     }
     else
     {
-        _internal_ck_execute_stage(&_internal_ck_state.stageNamePair[_internal_ck_state.pairCount-1].stage);
+        _internal_ck_execute_stage(&_internal_ck_state.stages[_internal_ck_state.stageCount - 1], 0);
     }
 
     return 0;
 }
+
+// ===================================== SHELL API =====================================
 
 void _internal_ck_shell_output(ck_shell_output* output, ck_handle handle)
 {
@@ -216,7 +279,8 @@ ck_shell_output _internal_ck_shell(char* command, ...)
 
     if (!CreatePipe(&std_out_read, &std_out_write, &saAttr, 0))
     {
-        // handle errors.
+        CK_ERROR("Cake: Failed to create anonymous pipe when executing ck_shell with: \"%s\"", commandBuffer);
+        CK_ERROR("Cake: WIN32 Error Code: %d", GetLastError());
         return result;
     }
 
@@ -245,7 +309,8 @@ ck_shell_output _internal_ck_shell(char* command, ...)
         &pi
     ))
     {
-        // handle errors.
+        CK_ERROR("Cake: Failed to create process for command: \"%s\"", commandBuffer);
+        CK_ERROR("Cake: WIN32 Error Code: %d", GetLastError());
         return result;
     }
 
@@ -276,3 +341,5 @@ void ck_shell_free_output(ck_shell_output* output)
 #else
 #endif
 }
+
+// ===================================== SHELL API =====================================
