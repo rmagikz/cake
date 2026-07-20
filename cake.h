@@ -53,7 +53,6 @@ typedef struct
 
 typedef enum
 {
-    CK_LOG_LEVEL_INTERNAL,
     CK_LOG_LEVEL_FATAL,
     CK_LOG_LEVEL_ERROR,
     CK_LOG_LEVEL_WARNING,
@@ -67,36 +66,39 @@ typedef struct
     ck_stage* stages;
     int stageCount;
     ck_log_level logLevel;
+    ck_log_level internalLogLevel;
 } ck_state;
 
 static ck_state _internal_ck_state =
 {
-    .logLevel = CK_LOG_LEVEL_INFO
+    .logLevel = CK_LOG_LEVEL_TRACE,
+    .internalLogLevel = CK_LOG_LEVEL_INFO
 };
 
 // ==================================== LOG API ========================================
 
-static const char* level_strings[] = {"[CAKE]", "[FATAL]", "[ERROR]", "[WARNING]", "[INFO]", "[DEBUG]", "[TRACE]" };
-static const char* level_color[] = {"\033[0m", "\033[1;97m\033[101m", "\033[1;31m", "\033[1;33m", "\033[0;97m", "\033[0;92m", "\033[0;34m"};
+static const char* level_strings[] = {"[FATAL]", "[ERROR]", "[WARNING]", "[INFO]", "[DEBUG]", "[TRACE]" };
+static const char* level_color[] = {"\033[1;97m\033[101m", "\033[1;31m", "\033[1;33m", "\033[0;97m", "\033[0;92m", "\033[0;34m"};
 static const char* color_reset = "\033[0m";
 
-#define CK_FATAL(format, ...) ck_log(CK_LOG_LEVEL_FATAL, format, ##__VA_ARGS__)
+#define CK_FATAL(format, ...) _internal_ck_log(0, CK_LOG_LEVEL_FATAL, format, ##__VA_ARGS__)
+#define CK_ERROR(format, ...) _internal_ck_log(0, CK_LOG_LEVEL_ERROR, format, ##__VA_ARGS__)
+#define CK_WARN(format, ...)  _internal_ck_log(0, CK_LOG_LEVEL_WARNING, format, ##__VA_ARGS__)
+#define CK_INFO(format, ...)  _internal_ck_log(0, CK_LOG_LEVEL_INFO, format, ##__VA_ARGS__)
+#define CK_DEBUG(format, ...) _internal_ck_log(0, CK_LOG_LEVEL_DEBUG, format, ##__VA_ARGS__)
+#define CK_TRACE(format, ...) _internal_ck_log(0, CK_LOG_LEVEL_TRACE, format, ##__VA_ARGS__)
 
-#define CK_ERROR(format, ...) ck_log(CK_LOG_LEVEL_ERROR, format, ##__VA_ARGS__)
+#define _CK_FATAL(format, ...) _internal_ck_log(1, CK_LOG_LEVEL_FATAL, format, ##__VA_ARGS__)
+#define _CK_ERROR(format, ...) _internal_ck_log(1, CK_LOG_LEVEL_ERROR, format, ##__VA_ARGS__)
+#define _CK_WARN(format, ...)  _internal_ck_log(1, CK_LOG_LEVEL_WARNING, format, ##__VA_ARGS__)
+#define _CK_INFO(format, ...)  _internal_ck_log(1, CK_LOG_LEVEL_INFO, format, ##__VA_ARGS__)
+#define _CK_DEBUG(format, ...) _internal_ck_log(1, CK_LOG_LEVEL_DEBUG, format, ##__VA_ARGS__)
+#define _CK_TRACE(format, ...) _internal_ck_log(1, CK_LOG_LEVEL_TRACE, format, ##__VA_ARGS__)
 
-#define CK_WARN(format, ...) ck_log(CK_LOG_LEVEL_WARNING, format, ##__VA_ARGS__)
-
-#define CK_INFO(format, ...) ck_log(CK_LOG_LEVEL_INFO, format, ##__VA_ARGS__)
-
-#define CK_DEBUG(format, ...) ck_log(CK_LOG_LEVEL_DEBUG, format, ##__VA_ARGS__)
-
-#define CK_TRACE(format, ...) ck_log(CK_LOG_LEVEL_TRACE, format, ##__VA_ARGS__)
-
-#define CK_INTERNAL(format, ...) ck_log(CK_LOG_LEVEL_INTERNAL, format, ##__VA_ARGS__)
-
-void ck_log(ck_log_level level, char* format, ...)
+void _internal_ck_log(int internal, ck_log_level level, char* format, ...)
 {
-    if (level > _internal_ck_state.logLevel) { return; }
+    if (internal && level > _internal_ck_state.internalLogLevel) { return; }
+    if (!internal && level > _internal_ck_state.logLevel) { return; }
 
     va_list ptr;
 
@@ -107,18 +109,27 @@ void ck_log(ck_log_level level, char* format, ...)
     va_end(ptr);
 
     char formatted_message[32000] = "";
-    sprintf(formatted_message, "%s%s %s%s\n", level_color[level], level_strings[level], out_message, color_reset);
+
+    if (internal)
+    {
+        sprintf(formatted_message, "%s[CAKE] %s%s\n", level_color[level], out_message, color_reset);
+    }
+    else
+    {
+        sprintf(formatted_message, "%s%s %s%s\n", level_color[level], level_strings[level], out_message, color_reset);
+    }
+
     printf("%s", formatted_message);
 }
 
 void ck_set_log_level(ck_log_level level)
 {
-    if (level == 0)
-    {
-        CK_FATAL("Setting Cake log level to 0 is not permitted.");
-        return;
-    }
     _internal_ck_state.logLevel = level;
+}
+
+void ck_set_internal_log_level(ck_log_level level)
+{
+    _internal_ck_state.internalLogLevel = level;
 }
 
 // ==================================== LOG API ========================================
@@ -170,13 +181,13 @@ void _internal_ck_execute_stage(ck_stage* stage, int indentLevel)
         _internal_ck_execute_stage(dependencyStage, indentLevel + 1);
     }
 
-    CK_INTERNAL("Executing Stage: %s", stage->name);
+    _CK_INFO("Executing Stage: %s", stage->name);
     stage->work();
 }
 
 int main(int argc, char** argv)
 {
-    CK_INTERNAL("---------- Starting Cake ----------");
+    _CK_INFO("---------- Starting Cake ----------");
 
     configure_build();
 
@@ -199,7 +210,7 @@ int main(int argc, char** argv)
         _internal_ck_execute_stage(&_internal_ck_state.stages[_internal_ck_state.stageCount - 1], 0);
     }
 
-    CK_INTERNAL("------------ Finished -------------\n");
+    _CK_INFO("------------ Finished -------------\n");
 
     return 0;
 }
@@ -208,6 +219,7 @@ int main(int argc, char** argv)
 
 void _internal_ck_shell_output(ck_shell_output* output, ck_handle handle)
 {
+#ifdef WIN32
     int capacity = 10;
     output->lines = malloc(sizeof(char*) * capacity);
     output->count = 0;
@@ -252,6 +264,8 @@ void _internal_ck_shell_output(ck_shell_output* output, ck_handle handle)
     }
 
     output->isValid = 1;
+#else
+#endif
 }
 
 #define ck_shell(command, ...) _internal_ck_shell(command, __VA_ARGS__, 0)
@@ -263,11 +277,16 @@ ck_shell_output _internal_ck_shell(char* command, ...)
         .isValid = 0
     };
 
-    char commandBuffer[1024];
+    char inCommand[32000];
     va_list args;
     va_start(args, command);
-    vsnprintf(commandBuffer, sizeof(commandBuffer), command, args);
+    vsnprintf(inCommand, sizeof(inCommand), command, args);
     va_end(args);
+
+    char formattedCommand[32000];
+    sprintf(formattedCommand, "cmd.exe /c %s", inCommand);
+
+    _CK_TRACE("%s", formattedCommand);
 
     HANDLE std_out_read = INVALID_HANDLE_VALUE;
     HANDLE std_out_write = INVALID_HANDLE_VALUE;
@@ -281,8 +300,8 @@ ck_shell_output _internal_ck_shell(char* command, ...)
 
     if (!CreatePipe(&std_out_read, &std_out_write, &saAttr, 0))
     {
-        CK_ERROR("Cake: Failed to create anonymous pipe when executing ck_shell with: \"%s\"", commandBuffer);
-        CK_ERROR("Cake: WIN32 Error Code: %d", GetLastError());
+        _CK_ERROR("[Cake] Failed to create anonymous pipe when executing ck_shell with: \"%s\"", inCommand);
+        _CK_ERROR("[Cake] WIN32 Error Code: %d", GetLastError());
         return result;
     }
 
@@ -300,7 +319,7 @@ ck_shell_output _internal_ck_shell(char* command, ...)
     if (!CreateProcess
     (
         NULL,
-        commandBuffer,
+        formattedCommand,
         NULL,
         NULL,
         TRUE,
@@ -311,8 +330,8 @@ ck_shell_output _internal_ck_shell(char* command, ...)
         &pi
     ))
     {
-        CK_ERROR("Cake: Failed to create process for command: \"%s\"", commandBuffer);
-        CK_ERROR("Cake: WIN32 Error Code: %d", GetLastError());
+        _CK_ERROR("[Cake] Failed to create process for command: \"%s\"", inCommand);
+        _CK_ERROR("[Cake] WIN32 Error Code: %d", GetLastError());
         return result;
     }
 
