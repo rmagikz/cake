@@ -122,7 +122,7 @@ ck_stage_result configure_subproject_build()
 
 ```c
 // cake.c
-#include "cake.h
+#include "cake.h"
 
 ck_stage_result stage_build()
 {
